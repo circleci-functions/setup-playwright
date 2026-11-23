@@ -15,6 +15,7 @@ import (
 )
 
 type cli struct {
+	Run     runCmd     `cmd:"" default:"withargs" help:"Install Playwright's browsers, then run a Playwright suite with circleci testsuite. Runs when no command is given."`
 	Install installCmd `cmd:"" help:"Install the browsers, and their system packages, that the project's Playwright needs, caching them across jobs."`
 }
 
