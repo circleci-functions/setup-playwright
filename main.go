@@ -14,10 +14,8 @@ import (
 	"github.com/circleci-functions/toolkit/sdk"
 )
 
-type cli struct{}
-
-func (c *cli) Run(context.Context, *sdk.Client) error {
-	return nil
+type cli struct {
+	Install installCmd `cmd:"" help:"Install the browsers, and their system packages, that the project's Playwright needs, caching them across jobs."`
 }
 
 func main() {
