@@ -55,6 +55,42 @@ func TestRun_KeepsTheConfigsTrace(t *testing.T) {
 	assert.Check(t, cmp.Contains(e.suitesSeen(t), "--reporter=junit,html << test.atoms >>"))
 }
 
+func TestRun_PassesArgsToListingAndRunning(t *testing.T) {
+	e := newEnv(t)
+
+	out, err := e.run(t, "--suite=e2e", "--args=--project chromium --config 'e2e/my config.ts'")
+	assert.NilError(t, err, out)
+	seen := e.suitesSeen(t)
+	want := `npx --no-install playwright test '--project' 'chromium' '--config' 'e2e/my config.ts'`
+	assert.Check(t, cmp.Contains(seen, want+" --list --reporter=json"))
+	assert.Check(t, cmp.Contains(seen, want+" --reporter=junit,html --trace=retain-on-failure << test.atoms >>"))
+}
+
+func TestRun_RejectsArgsTheSuiteSets(t *testing.T) {
+	for _, args := range []string{"--reporter=list", "--shard 1/2", "--trace on", "--list"} {
+		t.Run(args, func(t *testing.T) {
+			e := newEnv(t)
+
+			out, err := e.run(t, "--suite=e2e", "--args="+args)
+			assert.Check(t, err != nil, out)
+			assert.Check(t, cmp.Contains(out, "is not allowed"))
+			assert.Check(t, cmp.Nil(e.testsuiteRun(t)))
+		})
+	}
+}
+
+func TestRun_IgnoresArgsForTheProjectsSuite(t *testing.T) {
+	e := newEnv(t)
+	own := "---\nname: e2e\ndiscover: echo a.spec.ts\nrun: npx playwright test << test.atoms >>\n"
+	assert.NilError(t, os.MkdirAll(filepath.Dir(e.suitesFile()), 0o750))
+	assert.NilError(t, os.WriteFile(e.suitesFile(), []byte(own), 0o600))
+
+	out, err := e.run(t, "--suite=e2e", "--args=--project chromium")
+	assert.NilError(t, err, out)
+	assert.Check(t, cmp.Contains(out, "ignoring --args"))
+	assert.Check(t, cmp.Equal(e.suitesSeen(t), own))
+}
+
 func TestRun_RejectsAnUnknownTrace(t *testing.T) {
 	e := newEnv(t)
 

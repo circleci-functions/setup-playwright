@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/circleci-functions/toolkit/sdk"
+	"github.com/google/shlex"
 
 	"github.com/circleci-functions/setup-playwright/suites"
 )
@@ -30,12 +31,17 @@ type runCmd struct {
 	RunTests     string `name:"run-tests" enum:"default,all,impacted,none" default:"default" help:"Smarter Testing: which test files to select and run. impacted runs only those a change affects, which needs test impact analysis set up for the suite; default leaves it to testsuite: all on the default branch, impacted elsewhere."`
 	AnalyzeTests string `name:"analyze-tests" enum:"default,all,impacted,none" default:"default" help:"Smarter Testing: which test files to analyze for impact data, with the suite's analysis command. default leaves it to testsuite: impacted on the default branch, none elsewhere."`
 	Trace        string `default:"retain-on-failure" help:"Playwright's --trace mode for setup-playwright's own suite: on, off, on-first-retry, on-all-retries, retain-on-failure or retain-on-first-failure. Empty keeps the Playwright config's. A suite defined in .circleci/test-suites.yml sets its own."`
+	Args         string `help:"More arguments for playwright test in setup-playwright's own suite, used both to list the tests and to run them, such as --project or --config. A suite defined in .circleci/test-suites.yml sets its own." example:"--project chromium"`
 	OutputDir    string `name:"output-dir" default:"test-results" help:"Playwright's outputDir, relative to the working directory, where it saves traces, screenshots and videos. Stored as artifacts after the run."`
 }
 
 func (c *runCmd) Run(ctx context.Context, client *sdk.Client) error {
 	if c.Trace != "" && !slices.Contains(traceModes, c.Trace) {
 		return fmt.Errorf("--trace=%q: want one of %s, or empty", c.Trace, strings.Join(traceModes, ", "))
+	}
+	extra, err := c.extraArgs()
+	if err != nil {
+		return err
 	}
 	testsuite, err := exec.LookPath("circleci")
 	if err != nil {
@@ -53,7 +59,7 @@ func (c *runCmd) Run(ctx context.Context, client *sdk.Client) error {
 	defer os.RemoveAll(tmp)
 	report := filepath.Join(tmp, "report")
 
-	restore, err := c.useSuite(p.Dir, tmp)
+	restore, err := c.useSuite(p.Dir, tmp, extra)
 	if err != nil {
 		return err
 	}
@@ -102,7 +108,7 @@ func (c *runCmd) Run(ctx context.Context, client *sdk.Client) error {
 // useSuite makes sure the test-suites.yml testsuite reads for a run in dir
 // defines the suite, adding setup-playwright's own if it does not, and
 // returns what puts the file back.
-func (c *runCmd) useSuite(dir, tmp string) (restore func() error, err error) {
+func (c *runCmd) useSuite(dir, tmp string, extra []string) (restore func() error, err error) {
 	path, exists, err := suites.File(dir)
 	if err != nil {
 		return nil, err
@@ -114,10 +120,13 @@ func (c *runCmd) useSuite(dir, tmp string) (restore func() error, err error) {
 		}
 		if defined {
 			fmt.Fprintf(os.Stderr, "setup-playwright: running %s as %s defines it\n", c.Suite, path)
+			if len(extra) > 0 {
+				fmt.Fprintf(os.Stderr, "setup-playwright: ignoring --args, since %s sets the suite's own commands\n", path)
+			}
 			return func() error { return nil }, nil
 		}
 	}
-	s, err := c.ownSuite(tmp)
+	s, err := c.ownSuite(tmp, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -136,13 +145,16 @@ var listAtoms []byte
 // --reporter=junit, which replaces the config's reporters and so drops the
 // HTML report. This one asks Playwright for its test files, so testDir,
 // testMatch and projects are respected, and adds the HTML reporter.
-func (c *runCmd) ownSuite(tmp string) (suites.Suite, error) {
+func (c *runCmd) ownSuite(tmp string, extra []string) (suites.Suite, error) {
 	script := filepath.Join(tmp, "atoms.cjs")
 	if err := os.WriteFile(script, listAtoms, 0o600); err != nil {
 		return suites.Suite{}, err
 	}
 	list := filepath.Join(tmp, "list.json")
 	playwright := "npx --no-install playwright test"
+	for _, a := range extra {
+		playwright += " " + shellQuote(a)
+	}
 	run := "PLAYWRIGHT_JUNIT_OUTPUT_FILE=\"<< outputs.junit >>\" " + playwright + " --reporter=junit,html"
 	if c.Trace != "" {
 		run += " --trace=" + c.Trace
@@ -159,9 +171,41 @@ func (c *runCmd) ownSuite(tmp string) (suites.Suite, error) {
 	}, nil
 }
 
-// quote single-quotes s for the shell testsuite runs commands with.
-func quote(s string) string {
-	return "'" + strings.ReplaceAll(filepath.ToSlash(s), "'", `'\''`) + "'"
+// quote single-quotes a path for the shell testsuite runs commands with,
+// with forward slashes, which that shell takes on Windows too.
+func quote(path string) string {
+	return shellQuote(filepath.ToSlash(path))
+}
+
+// shellQuote single-quotes s for the shell testsuite runs commands with.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// ownedArgs are the playwright test options setup-playwright's suite sets
+// itself, or that would fight testsuite: it lists the tests, picks the
+// reporters, and splits the tests across parallel containers.
+var ownedArgs = map[string]string{
+	"--list":     "the suite lists the tests itself",
+	"--reporter": "the suite needs the junit reporter for testsuite, and adds html",
+	"--shard":    "testsuite splits the tests across the job's parallelism",
+	"--trace":    "use the trace flag",
+}
+
+// extraArgs splits Args the way a shell would, and rejects the options the
+// suite sets itself.
+func (c *runCmd) extraArgs() ([]string, error) {
+	args, err := shlex.Split(c.Args)
+	if err != nil {
+		return nil, fmt.Errorf("--args: %w", err)
+	}
+	for _, a := range args {
+		name, _, _ := strings.Cut(a, "=")
+		if why, ok := ownedArgs[name]; ok {
+			return nil, fmt.Errorf("--args: %s is not allowed: %s", name, why)
+		}
+	}
+	return args, nil
 }
 
 // store keeps a file, or a directory with anything in it, as artifacts.

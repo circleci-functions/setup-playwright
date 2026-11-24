@@ -53,6 +53,16 @@ func TestRun_FailingSuiteKeepsTraces(t *testing.T) {
 	assert.Check(t, cmp.Contains(stored, "playwright/test-results"))
 }
 
+func TestRun_PassesArgs(t *testing.T) {
+	needTestsuite(t)
+	e := newEnv(t, sharedBrowsers)
+
+	out, err := e.run(t, append([]string{"--suite=" + suite("args"), "--base-url=" + site(t, "home"),
+		"--args=--project chromium --grep 'home has'"}, chromium...)...)
+	assert.NilError(t, err, out)
+	assert.Check(t, cmp.Contains(out, "Ran 1 test atoms"), "the grep should narrow the listing as well as the run")
+}
+
 func TestRun_SelectsNoTests(t *testing.T) {
 	needTestsuite(t)
 	e := newEnv(t, sharedBrowsers)
