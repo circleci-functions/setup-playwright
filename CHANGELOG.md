@@ -6,6 +6,15 @@ added by its release PR (see [RELEASE.md](RELEASE.md)) and becomes its GitHub re
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-24
+
+### What's Changed
+* Retry a failed playwright install by @stiyyagura0901 in https://github.com/circleci-functions/setup-playwright/pull/8
+* Pass more playwright test arguments to setup-playwright's own suite by @stiyyagura0901 in https://github.com/circleci-functions/setup-playwright/pull/9
+
+
+**Full Changelog**: https://github.com/circleci-functions/setup-playwright/compare/v0.1.0...v0.2.0
+
 ## [0.1.0] - 2026-11-23
 
 The first release: `install` and `run`.
