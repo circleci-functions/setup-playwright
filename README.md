@@ -41,6 +41,7 @@ the working directory.
 | `run-tests` | `default` | Smarter Testing: which tests to run: `all`, `impacted`, `none` or `default` |
 | `analyze-tests` | `default` | Smarter Testing: which tests to analyze for impact data: `all`, `impacted`, `none` or `default` |
 | `trace` | `retain-on-failure` | Playwright's `--trace` mode for setup-playwright's own suite. Empty keeps the config's |
+| `args` | | More `playwright test` arguments for setup-playwright's own suite, such as `--project chromium` or `--config e2e/playwright.config.ts` |
 | `output-dir` | `test-results` | Playwright's `outputDir`, relative to `working-directory` |
 | `working-directory` | `.` | Directory holding the project's `package.json`, with its dependencies installed |
 
@@ -64,6 +65,11 @@ the file as it was. That suite:
   `projects` are respected;
 - runs them with the `junit` reporter, which testsuite reads, and the `html` reporter;
 - records a trace of every failed test (`--trace=retain-on-failure`; change it with `trace`).
+
+`args` go to both commands, so `--project`, `--config` or `--grep` narrow the listing as well as the
+run, and testsuite splits only those files. `--reporter`, `--trace`, `--list` and `--shard` are
+refused, since the suite sets them or testsuite does the splitting. A suite defined in
+`.circleci/test-suites.yml` ignores `args`.
 
 testsuite splits the test files across the job's `parallelism` by their past timings, and stores
 the results in the job's Tests tab, so the function does neither itself. Rerunning a workflow's
