@@ -1,8 +1,9 @@
 //go:build acceptance
 
 // Package acceptance_test runs setup-playwright against the real Playwright
-// npm package and its browsers, downloaded from npm and Playwright's CDN.
-// Tagged out of `task test` because it needs Node.js and the network.
+// npm package and its browsers, downloaded from npm and Playwright's CDN, and
+// the real circleci testsuite. Tagged out of `task test` because it needs
+// Node.js and the network.
 package acceptance_test
 
 import (
@@ -19,6 +20,7 @@ import (
 
 	"gotest.tools/v3/assert"
 
+	"github.com/circleci-functions/toolkit/sdk"
 	"github.com/circleci-functions/toolkit/sdk/sdktest"
 	"github.com/circleci-functions/toolkit/testing/compiler"
 	"github.com/circleci-functions/toolkit/testing/runner"
@@ -39,6 +41,10 @@ var testdata embed.FS
 
 var binaryPath string
 
+// sharedBrowsers is a browsers folder the tests share, so that they download
+// Chromium once between them.
+var sharedBrowsers string
+
 func TestMain(m *testing.M) {
 	status, err := runTests(m)
 	if err != nil {
@@ -49,6 +55,12 @@ func TestMain(m *testing.M) {
 }
 
 func runTests(m *testing.M) (int, error) {
+	dir, err := os.MkdirTemp("", "setup-playwright-acceptance-")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(dir)
+	sharedBrowsers = filepath.Join(dir, "ms-playwright")
 
 	if bin := os.Getenv(binaryPathEnvVar); bin != "" {
 		abs, err := filepath.Abs(bin)
@@ -87,8 +99,10 @@ func newEnv(t *testing.T, browsers string) *env {
 	}
 	e.vars = map[string]string{
 		"PLAYWRIGHT_BROWSERS_PATH": browsers,
-		// A sandbox gives each run a fresh HOME, where npm keeps its cache.
+		// A sandbox gives each run a fresh HOME, where Node.js and the
+		// circleci CLI keep what they have installed.
 		"npm_config_cache": npmCache(t),
+		"XDG_DATA_HOME":    xdgData(t),
 		"CI":               "true",
 	}
 	if runtime.GOOS == "windows" {
@@ -115,8 +129,9 @@ func (e *env) run(t *testing.T, args ...string) (string, error) {
 	return r.StdoutString() + r.StderrString(), err
 }
 
-// project copies the test project and installs its dependencies, with the
-// browser download skipped, for setup-playwright to do.
+// project copies the test project, installs its dependencies and makes it a
+// git repository, as a checkout is, since testsuite finds the project's root
+// by its .git.
 func project(t *testing.T) string {
 	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
@@ -126,6 +141,7 @@ func project(t *testing.T) string {
 	assert.NilError(t, os.CopyFS(dir, sub))
 	for _, args := range [][]string{
 		{npm(), "install", "--no-audit", "--no-fund", "--loglevel=error"},
+		{"git", "init", "--quiet"},
 	} {
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
@@ -136,11 +152,46 @@ func project(t *testing.T) string {
 	return dir
 }
 
+// needTestsuite skips a test that runs the suite where the circleci CLI has
+// no testsuite, which a CircleCI job always has.
+func needTestsuite(t *testing.T) {
+	t.Helper()
+	if err := exec.Command("circleci", "testsuite", "--help").Run(); err != nil {
+		if sdk.InCircleCIJob() {
+			t.Fatalf("circleci testsuite is not available in this job: %v", err)
+		}
+		t.Skipf("circleci testsuite is not available: %v (install it with `circleci extension install testsuite`)", err)
+	}
+}
+
+// suite names a test's suite uniquely within a workflow. testsuite takes a
+// second run of a suite in a workflow as a rerun, and skips the tests that
+// passed the first time, so the tests and the jobs running them each need
+// their own.
+func suite(name string) string {
+	if job := os.Getenv("CIRCLE_JOB"); job != "" {
+		return name + "-" + job
+	}
+	return name
+}
+
 func npmCache(t *testing.T) string {
 	t.Helper()
 	out, err := exec.Command(npm(), "config", "get", "cache").Output()
 	assert.NilError(t, err)
 	return string(trimNewline(out))
+}
+
+// xdgData is where the circleci CLI found its extensions before the sandbox
+// moved HOME.
+func xdgData(t *testing.T) string {
+	t.Helper()
+	if v := os.Getenv("XDG_DATA_HOME"); v != "" {
+		return v
+	}
+	home, err := os.UserHomeDir()
+	assert.NilError(t, err)
+	return filepath.Join(home, ".local", "share")
 }
 
 func trimNewline(b []byte) []byte {
