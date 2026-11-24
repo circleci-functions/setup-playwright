@@ -98,13 +98,31 @@ func TestInstall_WithoutTheCache(t *testing.T) {
 	assert.Check(t, cmp.Len(e.sandbox.Cache.SavedKeys(), 0))
 }
 
-func TestInstall_FailsWhenPlaywrightDoes(t *testing.T) {
+func TestInstall_RetriesAFailedInstall(t *testing.T) {
 	e := newEnv(t)
-	e.vars["FAKE_PLAYWRIGHT_INSTALL_FAILS"] = "1"
+	e.vars["FAKE_PLAYWRIGHT_INSTALL_FAILS"] = "2"
+
+	out, err := e.run(t, "install")
+	assert.NilError(t, err, out)
+	assert.Check(t, cmp.Contains(out, "playwright install --with-deps failed (attempt 1 of 3), trying again in 10ms"))
+	assert.Check(t, cmp.Contains(out, "(attempt 2 of 3), trying again in 20ms"))
+	assert.Check(t, cmp.DeepEqual(e.calls(t), []string{
+		"install --dry-run absent",
+		"install --with-deps absent",
+		"install --with-deps absent",
+		"install --with-deps absent",
+	}))
+	assert.Check(t, cmp.Len(e.sandbox.Cache.SavedKeys(), 1))
+}
+
+func TestInstall_FailsWhenPlaywrightKeepsFailing(t *testing.T) {
+	e := newEnv(t)
+	e.vars["FAKE_PLAYWRIGHT_INSTALL_FAILS"] = "3"
 
 	out, err := e.run(t, "install")
 	assert.Check(t, err != nil, out)
 	assert.Check(t, cmp.Contains(out, "playwright install --with-deps:"))
+	assert.Check(t, cmp.Len(e.calls(t), 4), "a listing and three attempts")
 	assert.Check(t, cmp.Len(e.sandbox.Cache.SavedKeys(), 0))
 }
 

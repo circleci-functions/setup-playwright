@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 )
 
 // packages are the npm packages that carry the Playwright CLI, in the order
@@ -129,17 +130,50 @@ func Installed(location string) bool {
 	return err == nil
 }
 
+// installAttempts is how many times Install tries before giving up. Package
+// mirrors and download CDNs fail now and then (an apt mirror mid-sync answers
+// 503), and a retry a little later usually gets through.
+const installAttempts = 3
+
+// RetryDelayEnvVar overrides the pause before Install's first retry, as a Go
+// duration. Tests set it so a failing install does not take half a minute.
+const RetryDelayEnvVar = "SETUP_PLAYWRIGHT_RETRY_DELAY"
+
 // Install downloads the browsers that are not installed already and, with
-// withDeps, the operating system packages they need.
+// withDeps, the operating system packages they need. It tries again after a
+// failure, waiting longer each time, since `playwright install` picks up where
+// a failed attempt stopped.
 func (p *Project) Install(ctx context.Context, b Browsers, withDeps bool) error {
 	args := []string{"install"}
 	if withDeps {
 		args = append(args, "--with-deps")
 	}
-	if err := p.Command(ctx, append(args, b.args()...)...).Run(); err != nil {
+	delay := retryDelay()
+	var err error
+	for attempt := 1; ; attempt++ {
+		err = p.Command(ctx, append(args, b.args()...)...).Run()
+		if err == nil || attempt == installAttempts || ctx.Err() != nil {
+			break
+		}
+		fmt.Fprintf(p.Stderr, "setup-playwright: playwright %s failed (attempt %d of %d), trying again in %s\n",
+			strings.Join(args, " "), attempt, installAttempts, delay)
+		select {
+		case <-ctx.Done():
+		case <-time.After(delay):
+		}
+		delay *= 2
+	}
+	if err != nil {
 		return fmt.Errorf("playwright %s: %w", strings.Join(args, " "), err)
 	}
 	return nil
+}
+
+func retryDelay() time.Duration {
+	if d, err := time.ParseDuration(os.Getenv(RetryDelayEnvVar)); err == nil && d >= 0 {
+		return d
+	}
+	return 15 * time.Second
 }
 
 // Command runs the project's own Playwright CLI, never one npx would
