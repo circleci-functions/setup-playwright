@@ -67,7 +67,14 @@ for b in ${browsers:-chromium} ffmpeg; do
   if [ -n "$dry" ]; then
     printf '%s\n  Install location:    %s\n\n' "$b" "$dir"
   else
-    [ -z "$FAKE_PLAYWRIGHT_INSTALL_FAILS" ] || { echo "install failed" >&2; exit 1; }
+    if [ -n "$FAKE_PLAYWRIGHT_INSTALL_FAILS" ]; then
+      # Fail the first FAKE_PLAYWRIGHT_INSTALL_FAILS installs, counted in a file.
+      count=$(cat "$FAKE_PLAYWRIGHT_LOG.fails" 2>/dev/null || echo 0)
+      if [ "$count" -lt "$FAKE_PLAYWRIGHT_INSTALL_FAILS" ]; then
+        echo $((count + 1)) > "$FAKE_PLAYWRIGHT_LOG.fails"
+        echo "install failed" >&2; exit 1
+      fi
+    fi
     mkdir -p "$dir" && touch "$dir/INSTALLATION_COMPLETE"
   fi
 done
@@ -128,11 +135,12 @@ func newEnv(t *testing.T) *env {
 	circleci := t.TempDir()
 	assert.NilError(t, os.WriteFile(filepath.Join(circleci, "circleci"), []byte(fakeTestsuite), 0o700)) //nolint:gosec // an executable script
 	e.vars = map[string]string{
-		"PLAYWRIGHT_BROWSERS_PATH": e.browsers,
-		"FAKE_PLAYWRIGHT_LOG":      e.log,
-		"FAKE_TESTSUITE_LOG":       e.testsuite,
-		"FAKE_SUITES_FILE":         e.suitesFile(),
-		"PATH":                     circleci + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"PLAYWRIGHT_BROWSERS_PATH":     e.browsers,
+		"FAKE_PLAYWRIGHT_LOG":          e.log,
+		"SETUP_PLAYWRIGHT_RETRY_DELAY": "10ms",
+		"FAKE_TESTSUITE_LOG":           e.testsuite,
+		"FAKE_SUITES_FILE":             e.suitesFile(),
+		"PATH":                         circleci + string(os.PathListSeparator) + os.Getenv("PATH"),
 	}
 	return e
 }

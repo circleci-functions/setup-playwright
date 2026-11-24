@@ -172,7 +172,7 @@ func TestRun_NeedsTheCircleCICLI(t *testing.T) {
 
 func TestRun_DoesNotRunTheSuiteWhenInstallFails(t *testing.T) {
 	e := newEnv(t)
-	e.vars["FAKE_PLAYWRIGHT_INSTALL_FAILS"] = "1"
+	e.vars["FAKE_PLAYWRIGHT_INSTALL_FAILS"] = "3"
 
 	out, err := e.run(t, "--suite=e2e")
 	assert.Check(t, err != nil, out)

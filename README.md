@@ -128,6 +128,10 @@ It uses the project's own Playwright from `node_modules`, so install your depend
 browser builds always match its version. Setting `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"` on the job
 keeps the package install from downloading them too.
 
+A failed `playwright install` is tried twice more, 15 and then 30 seconds later, since package
+mirrors and download CDNs fail now and then (an apt mirror mid-sync answers 503). Each attempt
+picks up where the last one stopped.
+
 ### Caching
 
 Playwright says where each browser build goes (`playwright install --dry-run`), and those
